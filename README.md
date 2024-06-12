@@ -1,1 +1,1 @@
-# CS314InstantMsgApp
+# Server-Side files for MERN stack project.
