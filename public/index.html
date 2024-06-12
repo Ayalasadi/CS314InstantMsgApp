@@ -1,19 +1,44 @@
-<!DOCTYPE html>
-<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Websockets</title>
+    <title>Chat App</title>
     <link href="style.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js" integrity="sha512-11t8Q+vY9JlCrr+PveZKTYJq8n7O09Y5X/pk/aMd3vJugSvu4xOunGEUzaADqL3I8cZKE/pBwwCfXzDkRJh2sQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"
+        integrity="sha512-Xm9qbB6Pu06k3PUwPj785dyTl6oHxgsv9nHp7ej7nCpAqGZT3OZpsELuCYX05DdonFpTlBpXMOxjavIAIUwr0w=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script defer src="app.js"></script>
 </head>
+
 <body>
-    <form>
-        <input type="text" placeholder="Your message">
-        <button>Send</button>
-    </form>
-    <ul></ul>
-    <p class="activity"></p>
+    <main>
+        <form class="form-signup">
+            <input type="text" id="realname" maxlength="8" placeholder="Real name" size="5" required>
+            <input type="text" id="screenname" maxlength="8" placeholder="Screen name" size="5" required>
+            <input type="text" id="password1" maxlength="8" placeholder="Password" size="5" required>
+            <input type="text" id="password2" maxlength="8" placeholder="Confirm password" size="5" required>
+            <button id="signup" type="submit">Join</button>
+        </form>
+
+        <form class="form-join">
+            <input type="text" id="name" maxlength="8" placeholder="Screen name" size="5" required>
+            <input type="text" id="password3" maxlength="8" placeholder="Password" size="5" required>
+            <input type="text" id="room" placeholder="Chat room" size="5" required>
+            <button id="join" type="submit">Login</button>
+        </form>
+
+        <ul class="chat-display"></ul>
+
+        <p class="user-list"></p>
+
+        <p class="room-list"></p>
+
+        <p class="activity"></p>
+
+        <form class="form-msg">
+            <input type="text" id="message" placeholder="Your message" required>
+            <button type="submit">Send</button>
+        </form>
+    </main>
 </body>
+
 </html>

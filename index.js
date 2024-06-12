@@ -1,116 +1,172 @@
-//Ken Rutan - index.js
 import express from 'express'
 import { Server } from "socket.io"
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { login, register } from './auth.js'; //Aya: added user registration and login capabilities 
-import cors from 'cors'; //Aya: import CORS module
-import jwt from 'jsonwebtoken'; //Aya: import JWT module
+import { connectToMongoDB } from './db/connectToMongoDB.js'
+
+import authRoutes from "./routes/auth.routes.js";
+import messageRoutes from "./routes/message.routes.js";
+import userRoutes from "./routes/user.routes.js";
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-
 const PORT = process.env.PORT || 3500
-const app = express();
+const ADMIN = "Admin"
 
-//Aya: Configure CORS based on the environment
-const corsOptions = {
-    origin: process.env.NODE_ENV === "production" ? 'http://localhost:5500' : '*',
-    methods: ['GET', 'POST']  // Adjust according to your needs
-};
+const app = express()
 
-app.use(cors(corsOptions)); //Aya: applies CORS middleware to all incoming requests
-app.use(express.json()); //Aya: adds JSON parsing middleware
+app.use("/api/auth", authRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/users", userRoutes);
 app.use(express.static(path.join(__dirname, "public")))
 
-//Aya: Autentication routes
-app.post('/register', async (req, res) => {
-    try {
-        const user = await register(req.body.username, req.body.password);
-        res.status(200).json(user);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-//Aya: User login route
-app.post('/login', async (req, res) => {
-    try {
-        const token = await login(req.body.username, req.body.password);
-        res.status(200).json({ token });
-    } catch (error) {
-        res.status(401).json({ error: error.message });
-    }
-});
-
-//Aya: error handling middleware
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).send('Uh-Oh, something broke!');
-});
-
 const expressServer = app.listen(PORT, () => {
+    connectToMongoDB();
     console.log(`listening on port ${PORT}`)
-})
-
-//Aya: Socket.IO server
-const io = new Server(expressServer, {
-    cors: corsOptions  //Aya: Apply CORS settings to Socket.IO
 });
 
-/*
-//Aya: commenting this out and replacing it with the above code
-//     to make the CORS configuration more robust and environment-specific.
+// state 
+const UsersState = {
+    users: [],
+    setUsers: function (newUsersArray) {
+        this.users = newUsersArray
+    }
+}
+
 const io = new Server(expressServer, {
     cors: {
-        //origin: process.env.NODE_ENV === "production" ? false : ["http://localhost:5500", "http://127.0.0.1:5500", "http://97.120.199.112:5500"]     //"*" Will allow access from everywhere.
-        origin: "*"     //"*" Will allow access from everywhere.
-
+        origin: process.env.NODE_ENV === "production" ? false : ["http://localhost:5500", "http://localhost:3500", "http://127.0.0.1:5500", "null", "*"]
     }
-}); */
-
-//Aya: adding middleware to Socket.IO that checks tokens provided during 
-//     the socket connection process
-io.use((socket, next) => {
-    const token = socket.handshake.query.token; //get token sent from client
-    jwt.verify(token, 'your-secret-key', (err, decoded) => {
-        if (err) {
-            console.log('Authentication error:', err.message);
-            return next(new Error('Authentication error')); //block connection if error
-        }
-        socket.decoded = decoded; //save decoded info (user ID) to socket session
-        next(); //proceed with the connection
-    });
-});
+})
 
 io.on('connection', socket => {
-    console.log(`Authenticated user ${socket.decoded.id} connected`); //Aya: Now we can use decoded info
+    console.log(`User ${socket.id} connected`)
 
-    // Upon connection - only to user
-    socket.emit('message', "Welcome to the Chat App!")
+    // Upon connection - only to user 
+    socket.emit('message', buildMsg(ADMIN, "Welcome to Chat App!"))
 
-    // Upon connection - to all others
-    socket.broadcast.emit('message', `User ${socket.id.substring(0, 5)} connected`)
+    socket.on('enterRoom', ({ name, login, room }) => {
+        console.log(name, login, room);
 
-    //Aya: enhanced logging for message events
-    socket.on('message', data => {
-        console.log(`Message from ${socket.decoded.id}: ${data}`);
-        io.emit('message', `${socket.decoded.id}: ${data}`);
-    });
+        // leave previous room 
+        const prevRoom = getUser(socket.id)?.room
 
-    // When user dissconnects - to all others
+        if (prevRoom) {
+            socket.leave(prevRoom)
+            io.to(prevRoom).emit('message', buildMsg(ADMIN, `${name} has left the room`))
+        }
+
+        const user = activateUser(socket.id, name, room)
+
+        // Cannot update previous room users list until after the state update in activate user 
+        if (prevRoom) {
+            io.to(prevRoom).emit('userList', {
+                users: getUsersInRoom(prevRoom)
+            })
+        }
+
+        // join room 
+        socket.join(user.room)
+
+        // To user who joined 
+        socket.emit('message', buildMsg(ADMIN, `You have joined the ${user.room} chat room`))
+
+        // To everyone else 
+        socket.broadcast.to(user.room).emit('message', buildMsg(ADMIN, `${user.name} has joined the room`))
+
+        // Update user list for room 
+        io.to(user.room).emit('userList', {
+            users: getUsersInRoom(user.room)
+        })
+
+        // Update rooms list for everyone 
+        io.emit('roomList', {
+            rooms: getAllActiveRooms()
+        })
+    })
+
+    //When the user signs up for a new account
+    socket.on('signUp', ({ realname, screenname, signup, confirm }) => {
+        console.log(realname + screenname + signup + confirm);
+        
+
+     })
+
+    // When user disconnects - to all others 
     socket.on('disconnect', () => {
-        console.log(`User ${socket.decoded.id} disconnected`); //Aya: Log when user disconnects
-        socket.broadcast.emit('message', `User ${socket.id.substring(0, 5)} disconnected`);
-    });
+        const user = getUser(socket.id)
+        userLeavesApp(socket.id)
 
-    // Listen for activity
+        if (user) {
+            io.to(user.room).emit('message', buildMsg(ADMIN, `${user.name} has left the room`))
+
+            io.to(user.room).emit('userList', {
+                users: getUsersInRoom(user.room)
+            })
+
+            io.emit('roomList', {
+                rooms: getAllActiveRooms()
+            })
+        }
+
+        console.log(`User ${socket.id} disconnected`)
+    })
+
+    // Listening for a message event 
+    socket.on('message', ({ name, text }) => {
+        const room = getUser(socket.id)?.room
+        if (room) {
+            io.to(room).emit('message', buildMsg(name, text))
+        }
+    })
+
+    // Listen for activity 
     socket.on('activity', (name) => {
-        nsole.log(`${name} is typing...`); //Aya: Log typing activity
-        socket.broadcast.emit('activity', name);
-    });
-});
+        const room = getUser(socket.id)?.room
+        if (room) {
+            socket.broadcast.to(room).emit('activity', name)
+        }
+    })
+})
+
+function buildMsg(name, text) {
+    return {
+        name,
+        text,
+        time: new Intl.DateTimeFormat('default', {
+            hour: 'numeric',
+            minute: 'numeric',
+            second: 'numeric'
+        }).format(new Date())
+    }
+}
 
 
-//httpServer.listen(3500, () => console.log('listening on port 3500'))
+// User functions 
+function activateUser(id, name, room) {
+    const user = { id, name, room }
+    UsersState.setUsers([
+        ...UsersState.users.filter(user => user.id !== id),
+        user
+    ])
+    return user
+}
+
+function userLeavesApp(id) {
+    UsersState.setUsers(
+        UsersState.users.filter(user => user.id !== id)
+    )
+}
+
+function getUser(id) {
+    return UsersState.users.find(user => user.id === id)
+}
+
+function getUsersInRoom(room) {
+    return UsersState.users.filter(user => user.room === room)
+}
+
+function getAllActiveRooms() {
+    return Array.from(new Set(UsersState.users.map(user => user.room)))
+}
